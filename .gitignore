@@ -1,0 +1,22 @@
+.build/
+.swiftpm/
+.DS_Store
+
+# Local-only build/signing settings.
+.env
+.env.local
+
+# Logs and local runtime data. The app stores these outside the repo by default.
+*.log
+.faceunlock/
+
+# Xcode/user state if the package is opened in Xcode.
+*.xcuserstate
+*.xcuserdata/
+DerivedData/
+
+# Generated app bundles and archives.
+*.app
+*.dSYM
+*.xcarchive
+
