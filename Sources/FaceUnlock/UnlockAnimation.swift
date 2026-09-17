@@ -1,5 +1,6 @@
 import AppKit
 import QuartzCore
+import Symbols
 
 @MainActor
 final class UnlockAnimationController: NSObject {
@@ -11,7 +12,7 @@ final class UnlockAnimationController: NSObject {
         panel?.orderOut(nil)
         panel?.close()
 
-        let size = NSSize(width: 164, height: 164)
+        let size = NSSize(width: 96, height: 96)
         let panel = NSPanel(
             contentRect: NSRect(origin: .zero, size: size),
             styleMask: [.borderless, .nonactivatingPanel],
@@ -30,7 +31,7 @@ final class UnlockAnimationController: NSObject {
         panel.canBecomeVisibleWithoutLogin = true
         panel.sharingType = .none
 
-        let animationView = FaceUnlockSuccessView(frame: NSRect(origin: .zero, size: size))
+        let animationView = UnlockIndicatorView(frame: NSRect(origin: .zero, size: size))
         panel.contentView = animationView
         panel.setFrame(Self.frame(for: size), display: true)
         panel.alphaValue = 1
@@ -38,10 +39,11 @@ final class UnlockAnimationController: NSObject {
 
         panel.orderFrontRegardless()
         FaceUnlockLog.shared.write("UNLOCK ANIMATION START")
+
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         animationView.start(reduceMotion: reduceMotion)
 
-        let visibleDuration = reduceMotion ? 0.85 : 1.55
+        let visibleDuration = reduceMotion ? 0.85 : 1.25
         let timer = Timer(
             timeInterval: visibleDuration,
             target: self,
@@ -73,286 +75,117 @@ final class UnlockAnimationController: NSObject {
         let screenFrame = (NSScreen.main ?? NSScreen.screens.first)?.frame ?? .zero
         let origin = NSPoint(
             x: screenFrame.midX - size.width / 2,
-            y: screenFrame.maxY - size.height - 72
+            y: screenFrame.maxY - size.height - 76
         )
         return NSRect(origin: origin, size: size)
     }
 }
 
-private final class FaceUnlockSuccessView: NSView {
-    private let backdropLayer = CALayer()
-    private let glowLayer = CAShapeLayer()
-    private let faceLayer = CAShapeLayer()
-    private let eyesLayer = CAShapeLayer()
-    private let smileLayer = CAShapeLayer()
-    private let scanLayer = CALayer()
-    private let checkLayer = CAShapeLayer()
+private final class UnlockIndicatorView: NSView {
+    private let imageView = NSImageView()
+    private var transitionTimer: Timer?
+
+    private let symbolConfiguration = NSImage.SymbolConfiguration(
+        pointSize: 52,
+        weight: .medium,
+        scale: .large
+    )
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
+
         wantsLayer = true
         layer = CALayer()
-        configureLayers()
+
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        imageView.imageAlignment = .alignCenter
+        imageView.imageScaling = .scaleProportionallyDown
+        imageView.contentTintColor = .white
+        imageView.wantsLayer = true
+        imageView.layer?.shadowColor = NSColor.black.cgColor
+        imageView.layer?.shadowOpacity = 0.62
+        imageView.layer?.shadowRadius = 4
+        imageView.layer?.shadowOffset = CGSize(width: 0, height: -1)
+        addSubview(imageView)
+
+        NSLayoutConstraint.activate([
+            imageView.centerXAnchor.constraint(equalTo: centerXAnchor),
+            imageView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            imageView.widthAnchor.constraint(equalToConstant: 72),
+            imageView.heightAnchor.constraint(equalToConstant: 72)
+        ])
     }
 
     required init?(coder: NSCoder) {
         nil
     }
 
-    override func layout() {
-        super.layout()
-        let contentRect = bounds.insetBy(dx: 10, dy: 10)
-        backdropLayer.frame = contentRect
-        backdropLayer.cornerRadius = 36
-
-        let iconRect = NSRect(x: 38, y: 38, width: 88, height: 88)
-        glowLayer.path = CGPath(ellipseIn: iconRect.insetBy(dx: -8, dy: -8), transform: nil)
-        faceLayer.path = Self.faceCornersPath(in: iconRect)
-        eyesLayer.path = Self.eyesPath(in: iconRect)
-        smileLayer.path = Self.smilePath(in: iconRect)
-        checkLayer.path = Self.checkPath(in: iconRect)
-        scanLayer.frame = NSRect(x: iconRect.minX + 8, y: iconRect.minY + 20, width: iconRect.width - 16, height: 2)
-    }
-
     func start(reduceMotion: Bool) {
-        layoutSubtreeIfNeeded()
-        resetLayers()
-        animateViewOpacity(from: 0, to: 1, duration: reduceMotion ? 0.08 : 0.18, timing: .easeOut)
-
-        if reduceMotion {
-            showReducedMotionConfirmation()
+        guard let closedLock = symbol(named: "lock.fill"),
+              let openLock = symbol(named: "lock.open.fill") else {
+            FaceUnlockLog.shared.write("ERROR: Unlock animation symbols unavailable")
             return
         }
 
-        let now = CACurrentMediaTime()
-        animateEntrance(at: now)
-        animateScan(at: now + 0.16)
-        animateConfirmation(at: now + 0.64)
-    }
+        transitionTimer?.invalidate()
+        imageView.image = closedLock
+        imageView.alphaValue = 1
 
-    private func configureLayers() {
-        guard let layer else { return }
-
-        backdropLayer.backgroundColor = NSColor.black.withAlphaComponent(0.76).cgColor
-        backdropLayer.borderColor = NSColor.white.withAlphaComponent(0.13).cgColor
-        backdropLayer.borderWidth = 1
-        backdropLayer.shadowColor = NSColor.black.cgColor
-        backdropLayer.shadowOpacity = 0.42
-        backdropLayer.shadowRadius = 24
-        backdropLayer.shadowOffset = CGSize(width: 0, height: -5)
-        layer.addSublayer(backdropLayer)
-
-        glowLayer.fillColor = NSColor.clear.cgColor
-        glowLayer.strokeColor = NSColor.systemGreen.withAlphaComponent(0.4).cgColor
-        glowLayer.lineWidth = 3
-        glowLayer.opacity = 0
-        backdropLayer.addSublayer(glowLayer)
-
-        [faceLayer, eyesLayer, smileLayer, checkLayer].forEach {
-            $0.fillColor = NSColor.clear.cgColor
-            $0.lineCap = .round
-            $0.lineJoin = .round
-            backdropLayer.addSublayer($0)
+        if reduceMotion {
+            imageView.image = openLock
+            FaceUnlockLog.shared.write("UNLOCK ANIMATION OPEN")
+            return
         }
 
-        faceLayer.strokeColor = NSColor.systemCyan.cgColor
-        faceLayer.lineWidth = 5
-        eyesLayer.strokeColor = NSColor.systemCyan.cgColor
-        eyesLayer.lineWidth = 4
-        smileLayer.strokeColor = NSColor.systemCyan.cgColor
-        smileLayer.lineWidth = 4
+        animateEntrance()
 
-        scanLayer.backgroundColor = NSColor.systemCyan.cgColor
-        scanLayer.cornerRadius = 1
-        scanLayer.shadowColor = NSColor.systemCyan.cgColor
-        scanLayer.shadowOpacity = 0.9
-        scanLayer.shadowRadius = 7
-        backdropLayer.addSublayer(scanLayer)
-
-        checkLayer.strokeColor = NSColor.systemGreen.cgColor
-        checkLayer.lineWidth = 7
-        checkLayer.opacity = 0
-    }
-
-    private func resetLayers() {
-        [backdropLayer, glowLayer, faceLayer, eyesLayer, smileLayer, scanLayer, checkLayer].forEach {
-            $0.removeAllAnimations()
-        }
-        backdropLayer.transform = CATransform3DIdentity
-        faceLayer.strokeEnd = 1
-        faceLayer.opacity = 1
-        eyesLayer.opacity = 1
-        smileLayer.opacity = 1
-        scanLayer.opacity = 0
-        glowLayer.opacity = 0
-        checkLayer.opacity = 0
-        checkLayer.strokeEnd = 0
-    }
-
-    private func animateViewOpacity(
-        from: Float,
-        to: Float,
-        duration: TimeInterval,
-        timing: CAMediaTimingFunctionName
-    ) {
-        guard let layer else { return }
-        layer.opacity = to
-        let animation = CABasicAnimation(keyPath: "opacity")
-        animation.fromValue = from
-        animation.toValue = to
-        animation.duration = duration
-        animation.timingFunction = CAMediaTimingFunction(name: timing)
-        layer.add(animation, forKey: "viewOpacity")
-    }
-
-    private func animateEntrance(at beginTime: CFTimeInterval) {
-        let scale = CAKeyframeAnimation(keyPath: "transform.scale")
-        scale.values = [0.78, 1.04, 1.0]
-        scale.keyTimes = [0, 0.72, 1]
-        scale.duration = 0.4
-        scale.beginTime = beginTime
-        scale.timingFunction = CAMediaTimingFunction(name: .easeOut)
-        backdropLayer.add(scale, forKey: "entrance")
-
-        let draw = CABasicAnimation(keyPath: "strokeEnd")
-        draw.fromValue = 0
-        draw.toValue = 1
-        draw.duration = 0.38
-        draw.beginTime = beginTime + 0.04
-        draw.timingFunction = CAMediaTimingFunction(name: .easeOut)
-        faceLayer.add(draw, forKey: "drawFace")
-    }
-
-    private func animateScan(at beginTime: CFTimeInterval) {
-        scanLayer.opacity = 0
-
-        let move = CABasicAnimation(keyPath: "transform.translation.y")
-        move.fromValue = 0
-        move.toValue = 47
-        move.duration = 0.42
-        move.beginTime = beginTime
-        move.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-
-        let opacity = CAKeyframeAnimation(keyPath: "opacity")
-        opacity.values = [0, 0.95, 0.95, 0]
-        opacity.keyTimes = [0, 0.15, 0.82, 1]
-        opacity.duration = 0.42
-        opacity.beginTime = beginTime
-
-        scanLayer.add(move, forKey: "scanMove")
-        scanLayer.add(opacity, forKey: "scanOpacity")
-    }
-
-    private func animateConfirmation(at beginTime: CFTimeInterval) {
-        let fade = CABasicAnimation(keyPath: "opacity")
-        fade.fromValue = 1
-        fade.toValue = 0
-        fade.duration = 0.16
-        fade.beginTime = beginTime
-        fade.fillMode = .forwards
-        fade.isRemovedOnCompletion = false
-        [faceLayer, eyesLayer, smileLayer].forEach { $0.add(fade, forKey: "faceFade") }
-
-        let checkOpacity = CABasicAnimation(keyPath: "opacity")
-        checkOpacity.fromValue = 0
-        checkOpacity.toValue = 1
-        checkOpacity.duration = 0.08
-        checkOpacity.beginTime = beginTime + 0.08
-        checkOpacity.fillMode = .forwards
-        checkOpacity.isRemovedOnCompletion = false
-        checkLayer.add(checkOpacity, forKey: "checkOpacity")
-
-        let checkDraw = CABasicAnimation(keyPath: "strokeEnd")
-        checkDraw.fromValue = 0
-        checkDraw.toValue = 1
-        checkDraw.duration = 0.34
-        checkDraw.beginTime = beginTime + 0.08
-        checkDraw.timingFunction = CAMediaTimingFunction(name: .easeOut)
-        checkDraw.fillMode = .forwards
-        checkDraw.isRemovedOnCompletion = false
-        checkLayer.add(checkDraw, forKey: "checkDraw")
-
-        let pulse = CAKeyframeAnimation(keyPath: "transform.scale")
-        pulse.values = [0.82, 1.13, 1.0]
-        pulse.keyTimes = [0, 0.62, 1]
-        pulse.duration = 0.5
-        pulse.beginTime = beginTime + 0.04
-        pulse.timingFunction = CAMediaTimingFunction(name: .easeOut)
-        glowLayer.opacity = 1
-        glowLayer.add(pulse, forKey: "successPulse")
-
-        let glowOpacity = CAKeyframeAnimation(keyPath: "opacity")
-        glowOpacity.values = [0, 0.8, 0.3]
-        glowOpacity.keyTimes = [0, 0.35, 1]
-        glowOpacity.duration = 0.62
-        glowOpacity.beginTime = beginTime
-        glowOpacity.fillMode = .forwards
-        glowOpacity.isRemovedOnCompletion = false
-        glowLayer.add(glowOpacity, forKey: "glowOpacity")
-    }
-
-    private func showReducedMotionConfirmation() {
-        faceLayer.opacity = 0
-        eyesLayer.opacity = 0
-        smileLayer.opacity = 0
-        scanLayer.opacity = 0
-        glowLayer.opacity = 0.45
-        checkLayer.opacity = 1
-        checkLayer.strokeEnd = 1
-    }
-
-    private static func faceCornersPath(in rect: NSRect) -> CGPath {
-        let path = CGMutablePath()
-        let segment: CGFloat = 22
-        let radius: CGFloat = 10
-
-        path.move(to: CGPoint(x: rect.minX, y: rect.minY + segment))
-        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + radius))
-        path.addQuadCurve(to: CGPoint(x: rect.minX + radius, y: rect.minY), control: CGPoint(x: rect.minX, y: rect.minY))
-        path.addLine(to: CGPoint(x: rect.minX + segment, y: rect.minY))
-
-        path.move(to: CGPoint(x: rect.maxX - segment, y: rect.minY))
-        path.addLine(to: CGPoint(x: rect.maxX - radius, y: rect.minY))
-        path.addQuadCurve(to: CGPoint(x: rect.maxX, y: rect.minY + radius), control: CGPoint(x: rect.maxX, y: rect.minY))
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY + segment))
-
-        path.move(to: CGPoint(x: rect.maxX, y: rect.maxY - segment))
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - radius))
-        path.addQuadCurve(to: CGPoint(x: rect.maxX - radius, y: rect.maxY), control: CGPoint(x: rect.maxX, y: rect.maxY))
-        path.addLine(to: CGPoint(x: rect.maxX - segment, y: rect.maxY))
-
-        path.move(to: CGPoint(x: rect.minX + segment, y: rect.maxY))
-        path.addLine(to: CGPoint(x: rect.minX + radius, y: rect.maxY))
-        path.addQuadCurve(to: CGPoint(x: rect.minX, y: rect.maxY - radius), control: CGPoint(x: rect.minX, y: rect.maxY))
-        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY - segment))
-        return path
-    }
-
-    private static func eyesPath(in rect: NSRect) -> CGPath {
-        let path = CGMutablePath()
-        let y = rect.midY + 10
-        path.move(to: CGPoint(x: rect.midX - 23, y: y))
-        path.addLine(to: CGPoint(x: rect.midX - 17, y: y))
-        path.move(to: CGPoint(x: rect.midX + 17, y: y))
-        path.addLine(to: CGPoint(x: rect.midX + 23, y: y))
-        return path
-    }
-
-    private static func smilePath(in rect: NSRect) -> CGPath {
-        let path = CGMutablePath()
-        path.move(to: CGPoint(x: rect.midX - 19, y: rect.midY - 11))
-        path.addQuadCurve(
-            to: CGPoint(x: rect.midX + 19, y: rect.midY - 11),
-            control: CGPoint(x: rect.midX, y: rect.midY - 27)
+        let timer = Timer(
+            timeInterval: 0.22,
+            target: self,
+            selector: #selector(openLockTimerFired(_:)),
+            userInfo: openLock,
+            repeats: false
         )
-        return path
+        transitionTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
     }
 
-    private static func checkPath(in rect: NSRect) -> CGPath {
-        let path = CGMutablePath()
-        path.move(to: CGPoint(x: rect.midX - 25, y: rect.midY - 1))
-        path.addLine(to: CGPoint(x: rect.midX - 7, y: rect.midY - 20))
-        path.addLine(to: CGPoint(x: rect.midX + 29, y: rect.midY + 21))
-        return path
+    @objc
+    private func openLockTimerFired(_ timer: Timer) {
+        transitionTimer = nil
+        guard let openLock = timer.userInfo as? NSImage else { return }
+
+        if #available(macOS 15.0, *) {
+            imageView.setSymbolImage(
+                openLock,
+                contentTransition: .replace.magic(fallback: .downUp)
+            )
+        } else {
+            imageView.setSymbolImage(openLock, contentTransition: .replace.downUp)
+        }
+        FaceUnlockLog.shared.write("UNLOCK ANIMATION OPEN")
+    }
+
+    private func symbol(named name: String) -> NSImage? {
+        NSImage(systemSymbolName: name, accessibilityDescription: nil)?
+            .withSymbolConfiguration(symbolConfiguration)
+    }
+
+    private func animateEntrance() {
+        guard let layer = imageView.layer else { return }
+
+        let opacity = CABasicAnimation(keyPath: "opacity")
+        opacity.fromValue = 0
+        opacity.toValue = 1
+        opacity.duration = 0.16
+        opacity.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        layer.add(opacity, forKey: "unlockEntranceOpacity")
+
+        let scale = CAKeyframeAnimation(keyPath: "transform.scale")
+        scale.values = [0.9, 1.025, 1.0]
+        scale.keyTimes = [0, 0.72, 1]
+        scale.duration = 0.28
+        scale.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        layer.add(scale, forKey: "unlockEntranceScale")
     }
 }

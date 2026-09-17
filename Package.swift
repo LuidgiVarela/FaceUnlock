@@ -18,6 +18,7 @@ let package = Package(
                 .linkedFramework("QuartzCore"),
                 .linkedFramework("Security"),
                 .linkedFramework("ServiceManagement"),
+                .linkedFramework("Symbols"),
                 .linkedFramework("Vision")
             ]
         )
