@@ -68,6 +68,7 @@ final class FaceUnlockEngine: @unchecked Sendable {
     private var attempts = 0
     private var snapshotValue = FaceUnlockEngineSnapshot()
     var onSnapshotChanged: ((FaceUnlockEngineSnapshot) -> Void)?
+    var onUnlockFeedbackRequested: (() -> Void)?
 
     init(
         printEvents: Bool,
@@ -203,6 +204,7 @@ final class FaceUnlockEngine: @unchecked Sendable {
             printLine("IDENTITY: MATCH")
             snapshotValue.lastFaceResult = String(format: "MATCH %.2f", similarity)
             log.write("IDENTITY MATCH")
+            onUnlockFeedbackRequested?()
             attemptUnlock()
             matched = true
             stopCameraAfterAttempt()

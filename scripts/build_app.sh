@@ -13,17 +13,23 @@ MACOS="$CONTENTS/MacOS"
 RESOURCES="$CONTENTS/Resources"
 EXECUTABLE="$MACOS/faceunlock"
 CONFIG="${FACEUNLOCK_BUILD_CONFIG:-debug}"
+SCRATCH_PATH="${FACEUNLOCK_SCRATCH_PATH:-$ROOT/.build}"
+BUILD_JOBS="${FACEUNLOCK_BUILD_JOBS:-}"
 BUNDLE_ID="${FACEUNLOCK_BUNDLE_ID:-com.example.FaceUnlock}"
 SIGNING_IDENTITY="${FACEUNLOCK_SIGNING_IDENTITY:-}"
 ICON_SOURCE="$ROOT/Assets/AppIcon/FaceUnlock-logo.png"
 ICONSET="$ROOT/.build/FaceUnlock.iconset"
 
 cd "$ROOT"
-swift build -c "$CONFIG" --arch arm64
+BUILD_ARGS=(-c "$CONFIG" --arch arm64 --scratch-path "$SCRATCH_PATH")
+if [[ -n "$BUILD_JOBS" ]]; then
+  BUILD_ARGS+=(-j "$BUILD_JOBS" -Xswiftc "-j$BUILD_JOBS" -Xswiftc -disable-batch-mode)
+fi
+swift build "${BUILD_ARGS[@]}"
 
 rm -rf "$APP"
 mkdir -p "$MACOS" "$RESOURCES"
-cp "$ROOT/.build/arm64-apple-macosx/$CONFIG/faceunlock" "$EXECUTABLE"
+cp "$SCRATCH_PATH/arm64-apple-macosx/$CONFIG/faceunlock" "$EXECUTABLE"
 
 cat > "$CONTENTS/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

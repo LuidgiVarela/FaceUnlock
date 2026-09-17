@@ -40,6 +40,7 @@ Durante o uso normal, FaceUnlock permanece em idle: câmera desligada, reconheci
 | **Câmera sob demanda** | Permanece desligada enquanto a sessão está desbloqueada. |
 | **Reconhecimento local** | Detecção facial, landmarks e liveness são processados no próprio Mac. |
 | **Liveness temporal** | A decisão considera múltiplos frames, piscada e movimento natural. |
+| **Feedback visual** | Uma animação compacta confirma o reconhecimento bem-sucedido. |
 | **Integração nativa** | Funciona em segundo plano como um app de menu bar para macOS. |
 
 ## Privacidade por arquitetura

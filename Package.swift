@@ -15,6 +15,7 @@ let package = Package(
                 .linkedFramework("AVFoundation"),
                 .linkedFramework("CoreGraphics"),
                 .linkedFramework("OpenDirectory"),
+                .linkedFramework("QuartzCore"),
                 .linkedFramework("Security"),
                 .linkedFramework("ServiceManagement"),
                 .linkedFramework("Vision")

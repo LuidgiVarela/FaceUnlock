@@ -44,6 +44,7 @@ enum AppPreferences {
 @MainActor
 final class FaceUnlockApplication: NSObject, NSApplicationDelegate {
     private let menuBar = MenuBarController()
+    private let unlockAnimation = UnlockAnimationController()
     private let engine = FaceUnlockEngine(
         printEvents: false,
         enableUnlockProvider: { AppPreferences.enableFaceUnlock },
@@ -64,6 +65,11 @@ final class FaceUnlockApplication: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async {
                 self?.menuBar.refresh()
                 self?.settingsWindow?.refresh()
+            }
+        }
+        engine.onUnlockFeedbackRequested = { [weak self] in
+            DispatchQueue.main.async {
+                self?.unlockAnimation.show()
             }
         }
         engine.start()
@@ -90,7 +96,9 @@ final class FaceUnlockApplication: NSObject, NSApplicationDelegate {
     }
 
     func testFaceRecognition() {
-        let controller = AppFaceTestController()
+        let controller = AppFaceTestController { [weak self] in
+            self?.unlockAnimation.show()
+        }
         transientWindow = controller
         controller.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -108,6 +116,10 @@ final class FaceUnlockApplication: NSObject, NSApplicationDelegate {
         transientWindow = controller
         controller.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func previewUnlockAnimation() {
+        unlockAnimation.show()
     }
 
     func openLog() {
@@ -236,6 +248,7 @@ final class MenuBarController {
         menu.addItem(actionItem("Update Password", #selector(AppMenuActions.updatePassword)))
         menu.addItem(actionItem("Settings", #selector(AppMenuActions.showSettings)))
         menu.addItem(actionItem("Diagnostics", #selector(AppMenuActions.showDiagnostics)))
+        menu.addItem(actionItem("Preview Unlock Animation", #selector(AppMenuActions.previewUnlockAnimation)))
         menu.addItem(actionItem("Open Log", #selector(AppMenuActions.openLog)))
         menu.addItem(.separator())
         menu.addItem(actionItem("Quit FaceUnlock", #selector(AppMenuActions.quit)))
@@ -263,6 +276,7 @@ final class AppMenuActions: NSObject {
     @objc func updatePassword() { delegate?.updatePassword() }
     @objc func showSettings() { delegate?.showSettings() }
     @objc func showDiagnostics() { delegate?.showDiagnostics() }
+    @objc func previewUnlockAnimation() { delegate?.previewUnlockAnimation() }
     @objc func openLog() { delegate?.openLog() }
     @objc func quit() { delegate?.quit() }
 }
@@ -1175,9 +1189,11 @@ final class AppFaceTestController: NSWindowController, @unchecked Sendable {
     private let template = try? TemplateStore().load()
     private let statusLabel = AppStyle.text("Look at the camera.", size: 13, color: .secondaryLabelColor)
     private let resultLabel = AppStyle.text("Waiting for liveness", size: 18, weight: .semibold, color: .controlAccentColor)
+    private let onMatch: @MainActor () -> Void
     private var finished = false
 
-    init() {
+    init(onMatch: @escaping @MainActor () -> Void) {
+        self.onMatch = onMatch
         super.init(window: AppStyle.window(title: "Test Face Recognition", size: NSSize(width: 560, height: 340)))
         window?.contentView = makeContent()
     }
@@ -1235,6 +1251,9 @@ final class AppFaceTestController: NSWindowController, @unchecked Sendable {
             self.resultLabel.textColor = matched ? .systemGreen : .systemOrange
             self.statusLabel.stringValue = String(format: "Liveness passed. Similarity %.2f.", similarity)
             self.camera.stop()
+            if matched {
+                self.onMatch()
+            }
         }
     }
 }
