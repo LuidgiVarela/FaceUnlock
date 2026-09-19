@@ -63,6 +63,7 @@ final class FaceUnlockEngine: @unchecked Sendable {
     private var monitor: SessionMonitor?
     private var template: FaceTemplate?
     private var matched = false
+    private var unlockFeedbackDeadline: Date?
     private var faceDetectedLogged = false
     private var currentState: SessionState = .unlocked
     private var attempts = 0
@@ -100,6 +101,7 @@ final class FaceUnlockEngine: @unchecked Sendable {
     }
 
     func stop() {
+        unlockFeedbackDeadline = nil
         camera.stop()
         snapshotValue.cameraOn = false
         log.write("CAMERA STOP")
@@ -135,6 +137,8 @@ final class FaceUnlockEngine: @unchecked Sendable {
 
         switch state {
         case .unlocked:
+            let shouldShowUnlockFeedback = unlockFeedbackDeadline.map { Date() <= $0 } ?? false
+            unlockFeedbackDeadline = nil
             attempts = 0
             matched = false
             faceDetectedLogged = false
@@ -143,7 +147,12 @@ final class FaceUnlockEngine: @unchecked Sendable {
             log.write("SESSION UNLOCKED")
             camera.stop()
             log.write("CAMERA STOP")
+            if shouldShowUnlockFeedback {
+                log.write("UNLOCK ANIMATION REQUESTED AFTER SESSION UNLOCKED")
+                onUnlockFeedbackRequested?()
+            }
         case .locked:
+            unlockFeedbackDeadline = nil
             snapshotValue.lastLockEvent = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
             log.write("SESSION LOCKED")
             printLine("Session lock detected.")
@@ -204,7 +213,6 @@ final class FaceUnlockEngine: @unchecked Sendable {
             printLine("IDENTITY: MATCH")
             snapshotValue.lastFaceResult = String(format: "MATCH %.2f", similarity)
             log.write("IDENTITY MATCH")
-            onUnlockFeedbackRequested?()
             attemptUnlock()
             matched = true
             stopCameraAfterAttempt()
@@ -224,6 +232,7 @@ final class FaceUnlockEngine: @unchecked Sendable {
     }
 
     private func attemptUnlock() {
+        unlockFeedbackDeadline = nil
         guard currentState == .locked else {
             snapshotValue.lastError = "Session unlocked before injection"
             log.write("ERROR: Session unlocked before injection")
@@ -245,16 +254,20 @@ final class FaceUnlockEngine: @unchecked Sendable {
             log.write("ACCESSIBILITY \(accessibility ? "PASS" : "FAIL")")
             log.write("CGEvent available: \(LockScreenKeyboardInjector.eventSourceAvailable() ? "YES" : "NO")")
             log.write("CGEvent injection started")
+            unlockFeedbackDeadline = Date().addingTimeInterval(4)
+            log.write("UNLOCK ANIMATION QUEUED")
             let sent = keyboardInjector.injectPasswordAndReturn(password, sessionState: currentState)
             if sent {
                 printLine("Keyboard injection: SENT")
                 snapshotValue.lastUnlockAttempt = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
                 log.write("Return sent")
             } else {
+                unlockFeedbackDeadline = nil
                 snapshotValue.lastError = "Keyboard injection failed"
                 log.write("ERROR: Keyboard injection failed")
             }
         } catch {
+            unlockFeedbackDeadline = nil
             printLine("Keychain password available: NO")
             printLine("Unlock skipped: \(error.localizedDescription)")
             snapshotValue.lastError = "Keychain unavailable"

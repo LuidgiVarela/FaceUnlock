@@ -68,7 +68,7 @@ final class FaceUnlockApplication: NSObject, NSApplicationDelegate {
             }
         }
         engine.onUnlockFeedbackRequested = { [weak self] in
-            DispatchQueue.main.async {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
                 self?.unlockAnimation.show()
             }
         }
