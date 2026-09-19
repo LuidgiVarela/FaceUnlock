@@ -43,7 +43,7 @@ final class UnlockAnimationController: NSObject {
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         animationView.start(reduceMotion: reduceMotion)
 
-        let visibleDuration = reduceMotion ? 0.85 : 1.25
+        let visibleDuration = reduceMotion ? 1.0 : 1.6
         let timer = Timer(
             timeInterval: visibleDuration,
             target: self,
