@@ -43,7 +43,7 @@ final class UnlockAnimationController: NSObject {
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         animationView.start(reduceMotion: reduceMotion)
 
-        let visibleDuration = reduceMotion ? 1.0 : 1.6
+        let visibleDuration = reduceMotion ? 1.2 : 2.2
         let timer = Timer(
             timeInterval: visibleDuration,
             target: self,
@@ -83,11 +83,12 @@ final class UnlockAnimationController: NSObject {
 
 private final class UnlockIndicatorView: NSView {
     private let imageView = NSImageView()
-    private var transitionTimer: Timer?
+    private var successTimer: Timer?
+    private var bounceTimer: Timer?
 
     private let symbolConfiguration = NSImage.SymbolConfiguration(
-        pointSize: 52,
-        weight: .medium,
+        pointSize: 56,
+        weight: .regular,
         scale: .large
     )
 
@@ -121,49 +122,76 @@ private final class UnlockIndicatorView: NSView {
     }
 
     func start(reduceMotion: Bool) {
-        guard let closedLock = symbol(named: "lock.fill"),
-              let openLock = symbol(named: "lock.open.fill") else {
+        guard let faceID = symbol(named: "faceid"),
+              let success = symbol(named: "checkmark.circle") else {
             FaceUnlockLog.shared.write("ERROR: Unlock animation symbols unavailable")
             return
         }
 
-        transitionTimer?.invalidate()
-        imageView.image = closedLock
+        successTimer?.invalidate()
+        bounceTimer?.invalidate()
+        imageView.removeAllSymbolEffects(animated: false)
+        imageView.contentTintColor = .systemBlue
+        imageView.image = faceID
         imageView.alphaValue = 1
 
         if reduceMotion {
-            imageView.image = openLock
-            FaceUnlockLog.shared.write("UNLOCK ANIMATION OPEN")
+            imageView.image = success
+            FaceUnlockLog.shared.write("UNLOCK ANIMATION SUCCESS")
             return
         }
 
         animateEntrance()
+        animateFaceIDScan()
 
         let timer = Timer(
-            timeInterval: 0.22,
+            timeInterval: 0.78,
             target: self,
-            selector: #selector(openLockTimerFired(_:)),
-            userInfo: openLock,
+            selector: #selector(successTimerFired(_:)),
+            userInfo: success,
             repeats: false
         )
-        transitionTimer = timer
+        successTimer = timer
         RunLoop.main.add(timer, forMode: .common)
+        FaceUnlockLog.shared.write("UNLOCK ANIMATION FACE ID")
     }
 
     @objc
-    private func openLockTimerFired(_ timer: Timer) {
-        transitionTimer = nil
-        guard let openLock = timer.userInfo as? NSImage else { return }
+    private func successTimerFired(_ timer: Timer) {
+        successTimer = nil
+        guard let success = timer.userInfo as? NSImage else { return }
+
+        imageView.removeAllSymbolEffects(animated: false)
 
         if #available(macOS 15.0, *) {
             imageView.setSymbolImage(
-                openLock,
+                success,
                 contentTransition: .replace.magic(fallback: .downUp)
             )
         } else {
-            imageView.setSymbolImage(openLock, contentTransition: .replace.downUp)
+            imageView.setSymbolImage(success, contentTransition: .replace.downUp)
         }
-        FaceUnlockLog.shared.write("UNLOCK ANIMATION OPEN")
+
+        let timer = Timer(
+            timeInterval: 0.18,
+            target: self,
+            selector: #selector(bounceTimerFired(_:)),
+            userInfo: nil,
+            repeats: false
+        )
+        bounceTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+        FaceUnlockLog.shared.write("UNLOCK ANIMATION SUCCESS")
+    }
+
+    @objc
+    private func bounceTimerFired(_ timer: Timer) {
+        bounceTimer = nil
+        imageView.addSymbolEffect(
+            .bounce.up.wholeSymbol,
+            options: .speed(1.15),
+            animated: true
+        )
     }
 
     private func symbol(named name: String) -> NSImage? {
@@ -187,5 +215,21 @@ private final class UnlockIndicatorView: NSView {
         scale.duration = 0.28
         scale.timingFunction = CAMediaTimingFunction(name: .easeOut)
         layer.add(scale, forKey: "unlockEntranceScale")
+    }
+
+    private func animateFaceIDScan() {
+        if #available(macOS 26.0, *) {
+            imageView.addSymbolEffect(
+                .drawOn.individually,
+                options: .speed(1.35),
+                animated: true
+            )
+        } else {
+            imageView.addSymbolEffect(
+                .pulse.byLayer,
+                options: .speed(1.2),
+                animated: true
+            )
+        }
     }
 }
