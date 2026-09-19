@@ -84,9 +84,13 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
     private let searchField = NSSearchField()
     private let contentStack = FlippedSettingsStackView()
     private let contentScrollView = NSScrollView()
+    private let navigationControl = NSSegmentedControl()
     private let brandStatus = NSTextField(labelWithString: "")
     private var selectedPane: FaceUnlockSettingsPane = .general
     private var visiblePanes = FaceUnlockSettingsPane.allCases
+    private var navigationHistory: [FaceUnlockSettingsPane] = [.general]
+    private var navigationIndex = 0
+    private var isUpdatingSidebarSelection = false
     private var animationPreviewImage: NSImageView?
     private var animationSuccessImage: NSImageView?
     private var colorWell: NSColorWell?
@@ -106,7 +110,7 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
         self.engine = engine
 
         let window = NSWindow(
-            contentRect: NSRect(origin: .zero, size: NSSize(width: 960, height: 720)),
+            contentRect: NSRect(origin: .zero, size: NSSize(width: 840, height: 760)),
             styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -115,17 +119,21 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.toolbarStyle = .unified
-        window.minSize = NSSize(width: 820, height: 600)
+        window.minSize = NSSize(width: 760, height: 640)
+        window.backgroundColor = .windowBackgroundColor
         window.isMovableByWindowBackground = true
-        window.setFrameAutosaveName("FaceUnlockSettingsWindow")
+        window.setFrameAutosaveName("FaceUnlockSettingsWindowNative")
 
         super.init(window: window)
         configureSidebar()
         configureContentArea()
         configureSplitView()
+        isUpdatingSidebarSelection = true
         sidebarTable.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+        isUpdatingSidebarSelection = false
         window.initialFirstResponder = sidebarTable
         window.makeFirstResponder(sidebarTable)
+        updateNavigationControl()
         rebuildPage()
         window.center()
     }
@@ -149,12 +157,12 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
 
         let sidebar = NSVisualEffectView()
         sidebar.material = .sidebar
-        sidebar.blendingMode = .behindWindow
+        sidebar.blendingMode = .withinWindow
         sidebar.state = .active
 
         let detail = NSVisualEffectView()
         detail.material = .windowBackground
-        detail.blendingMode = .behindWindow
+        detail.blendingMode = .withinWindow
         detail.state = .active
 
         splitView.addArrangedSubview(sidebar)
@@ -162,13 +170,13 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
         splitView.setHoldingPriority(.defaultHigh, forSubviewAt: 0)
 
         NSLayoutConstraint.activate([
-            sidebar.widthAnchor.constraint(greaterThanOrEqualToConstant: 220),
-            sidebar.widthAnchor.constraint(lessThanOrEqualToConstant: 280)
+            sidebar.widthAnchor.constraint(greaterThanOrEqualToConstant: 225),
+            sidebar.widthAnchor.constraint(lessThanOrEqualToConstant: 265)
         ])
 
         configureSidebar(in: sidebar)
         configureContentArea(in: detail)
-        splitView.setPosition(248, ofDividerAt: 0)
+        splitView.setPosition(238, ofDividerAt: 0)
     }
 
     private func configureSidebar() {
@@ -186,8 +194,8 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("SettingsPane"))
         sidebarTable.addTableColumn(column)
         sidebarTable.headerView = nil
-        sidebarTable.rowHeight = 38
-        sidebarTable.intercellSpacing = NSSize(width: 0, height: 3)
+        sidebarTable.rowHeight = 32
+        sidebarTable.intercellSpacing = NSSize(width: 0, height: 2)
         sidebarTable.backgroundColor = .clear
         sidebarTable.style = .sourceList
         sidebarTable.focusRingType = .none
@@ -197,39 +205,32 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
         tableScroll.drawsBackground = false
         tableScroll.hasVerticalScroller = false
 
-        let version = label("FaceUnlock 0.1", size: 11, color: .tertiaryLabelColor)
-        version.alignment = .center
-
-        [brand, searchField, tableScroll, version].forEach {
+        [brand, searchField, tableScroll].forEach {
             $0.translatesAutoresizingMaskIntoConstraints = false
             sidebar.addSubview($0)
         }
 
         NSLayoutConstraint.activate([
-            brand.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor, constant: 14),
-            brand.trailingAnchor.constraint(equalTo: sidebar.trailingAnchor, constant: -14),
-            brand.topAnchor.constraint(equalTo: sidebar.topAnchor, constant: 45),
-
             searchField.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor, constant: 14),
             searchField.trailingAnchor.constraint(equalTo: sidebar.trailingAnchor, constant: -14),
-            searchField.topAnchor.constraint(equalTo: brand.bottomAnchor, constant: 16),
+            searchField.topAnchor.constraint(equalTo: sidebar.topAnchor, constant: 49),
+
+            brand.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor, constant: 16),
+            brand.trailingAnchor.constraint(equalTo: sidebar.trailingAnchor, constant: -14),
+            brand.topAnchor.constraint(equalTo: searchField.bottomAnchor, constant: 12),
 
             tableScroll.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor, constant: 8),
             tableScroll.trailingAnchor.constraint(equalTo: sidebar.trailingAnchor, constant: -8),
-            tableScroll.topAnchor.constraint(equalTo: searchField.bottomAnchor, constant: 12),
-            tableScroll.bottomAnchor.constraint(equalTo: version.topAnchor, constant: -10),
-
-            version.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor, constant: 12),
-            version.trailingAnchor.constraint(equalTo: sidebar.trailingAnchor, constant: -12),
-            version.bottomAnchor.constraint(equalTo: sidebar.bottomAnchor, constant: -14)
+            tableScroll.topAnchor.constraint(equalTo: brand.bottomAnchor, constant: 13),
+            tableScroll.bottomAnchor.constraint(equalTo: sidebar.bottomAnchor, constant: -12)
         ])
     }
 
     private func configureContentArea() {
         contentStack.orientation = .vertical
         contentStack.alignment = .leading
-        contentStack.spacing = 20
-        contentStack.edgeInsets = NSEdgeInsets(top: 34, left: 36, bottom: 40, right: 36)
+        contentStack.spacing = 16
+        contentStack.edgeInsets = NSEdgeInsets(top: 18, left: 24, bottom: 32, right: 24)
         contentStack.translatesAutoresizingMaskIntoConstraints = false
 
         contentScrollView.drawsBackground = false
@@ -239,12 +240,39 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
     }
 
     private func configureContentArea(in detail: NSView) {
+        let toolbar = NSVisualEffectView()
+        toolbar.material = .headerView
+        toolbar.blendingMode = .withinWindow
+        toolbar.state = .active
+        toolbar.translatesAutoresizingMaskIntoConstraints = false
+
+        navigationControl.segmentCount = 2
+        navigationControl.trackingMode = .momentary
+        navigationControl.segmentStyle = .rounded
+        navigationControl.setImage(NSImage(systemSymbolName: "chevron.left", accessibilityDescription: "Back"), forSegment: 0)
+        navigationControl.setImage(NSImage(systemSymbolName: "chevron.right", accessibilityDescription: "Forward"), forSegment: 1)
+        navigationControl.setWidth(30, forSegment: 0)
+        navigationControl.setWidth(30, forSegment: 1)
+        navigationControl.target = self
+        navigationControl.action = #selector(navigateHistory(_:))
+        navigationControl.translatesAutoresizingMaskIntoConstraints = false
+        toolbar.addSubview(navigationControl)
+
         contentScrollView.translatesAutoresizingMaskIntoConstraints = false
         detail.addSubview(contentScrollView)
+        detail.addSubview(toolbar)
         NSLayoutConstraint.activate([
+            toolbar.leadingAnchor.constraint(equalTo: detail.leadingAnchor),
+            toolbar.trailingAnchor.constraint(equalTo: detail.trailingAnchor),
+            toolbar.topAnchor.constraint(equalTo: detail.topAnchor),
+            toolbar.heightAnchor.constraint(equalToConstant: 52),
+
+            navigationControl.leadingAnchor.constraint(equalTo: toolbar.leadingAnchor, constant: 17),
+            navigationControl.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor, constant: 5),
+
             contentScrollView.leadingAnchor.constraint(equalTo: detail.leadingAnchor),
             contentScrollView.trailingAnchor.constraint(equalTo: detail.trailingAnchor),
-            contentScrollView.topAnchor.constraint(equalTo: detail.topAnchor, constant: 28),
+            contentScrollView.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
             contentScrollView.bottomAnchor.constraint(equalTo: detail.bottomAnchor),
             contentStack.widthAnchor.constraint(equalTo: contentScrollView.contentView.widthAnchor),
             contentStack.bottomAnchor.constraint(greaterThanOrEqualTo: contentScrollView.contentView.bottomAnchor)
@@ -252,17 +280,17 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
     }
 
     private func makeBrandView() -> NSView {
-        let row = horizontalStack(spacing: 11)
+        let row = horizontalStack(spacing: 10)
         let icon = NSImageView(image: NSImage(named: "FaceUnlock") ?? NSImage())
         icon.imageScaling = .scaleProportionallyUpOrDown
         NSLayoutConstraint.activate([
-            icon.widthAnchor.constraint(equalToConstant: 42),
-            icon.heightAnchor.constraint(equalToConstant: 42)
+            icon.widthAnchor.constraint(equalToConstant: 36),
+            icon.heightAnchor.constraint(equalToConstant: 36)
         ])
         row.addArrangedSubview(icon)
 
         let textStack = verticalStack(spacing: 2)
-        textStack.addArrangedSubview(label("FaceUnlock", size: 15, weight: .semibold))
+        textStack.addArrangedSubview(label("FaceUnlock", size: 13, weight: .semibold))
         brandStatus.font = .systemFont(ofSize: 11)
         textStack.addArrangedSubview(brandStatus)
         row.addArrangedSubview(textStack)
@@ -291,11 +319,11 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
         sidebarTable.reloadData()
 
         if let row = visiblePanes.firstIndex(of: selectedPane) {
+            isUpdatingSidebarSelection = true
             sidebarTable.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+            isUpdatingSidebarSelection = false
         } else if let first = visiblePanes.first {
-            selectedPane = first
-            sidebarTable.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
-            rebuildPage()
+            showPane(first, recordHistory: true)
         }
     }
 
@@ -309,10 +337,53 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
+        guard !isUpdatingSidebarSelection else { return }
         let row = sidebarTable.selectedRow
         guard visiblePanes.indices.contains(row) else { return }
-        selectedPane = visiblePanes[row]
+        showPane(visiblePanes[row], recordHistory: true)
+    }
+
+    private func showPane(_ pane: FaceUnlockSettingsPane, recordHistory: Bool) {
+        if recordHistory, pane != selectedPane {
+            if navigationIndex < navigationHistory.count - 1 {
+                navigationHistory.removeSubrange((navigationIndex + 1)..<navigationHistory.count)
+            }
+            navigationHistory.append(pane)
+            navigationIndex = navigationHistory.count - 1
+        }
+
+        selectedPane = pane
+        if !visiblePanes.contains(pane) {
+            searchField.stringValue = ""
+            visiblePanes = FaceUnlockSettingsPane.allCases
+            sidebarTable.reloadData()
+        }
+        if let row = visiblePanes.firstIndex(of: pane) {
+            isUpdatingSidebarSelection = true
+            sidebarTable.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+            sidebarTable.scrollRowToVisible(row)
+            isUpdatingSidebarSelection = false
+        }
+        updateNavigationControl()
+        contentScrollView.contentView.scroll(to: .zero)
         rebuildPage()
+    }
+
+    private func updateNavigationControl() {
+        navigationControl.setEnabled(navigationIndex > 0, forSegment: 0)
+        navigationControl.setEnabled(navigationIndex < navigationHistory.count - 1, forSegment: 1)
+    }
+
+    @objc
+    private func navigateHistory(_ sender: NSSegmentedControl) {
+        if sender.selectedSegment == 0, navigationIndex > 0 {
+            navigationIndex -= 1
+        } else if sender.selectedSegment == 1, navigationIndex < navigationHistory.count - 1 {
+            navigationIndex += 1
+        } else {
+            return
+        }
+        showPane(navigationHistory[navigationIndex], recordHistory: false)
     }
 
     private func rebuildPage() {
@@ -507,44 +578,41 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
     }
 
     private func pageHeader(for pane: FaceUnlockSettingsPane) -> NSView {
-        let stack = verticalStack(spacing: 7)
+        let surface = SettingsSurfaceView()
+        let stack = verticalStack(spacing: 5)
         stack.alignment = .centerX
-        stack.edgeInsets = NSEdgeInsets(top: 4, left: 0, bottom: 8, right: 0)
-        stack.addArrangedSubview(symbolTile(symbol: pane.symbol, color: pane.color, size: 58, symbolSize: 30, radius: 13))
+        stack.edgeInsets = NSEdgeInsets(top: 20, left: 18, bottom: 19, right: 18)
+        let icon = symbolTile(symbol: pane.symbol, color: pane.color, size: 52, symbolSize: 27, radius: 12)
+        stack.addArrangedSubview(icon)
+        stack.setCustomSpacing(8, after: icon)
 
-        let title = label(pane.title, size: 26, weight: .bold)
+        let title = label(pane.title, size: 23, weight: .semibold)
         title.alignment = .center
         stack.addArrangedSubview(title)
 
-        let subtitle = label(pane.subtitle, size: 13, color: .secondaryLabelColor)
+        let subtitle = label(pane.subtitle, size: 12, color: .secondaryLabelColor)
         subtitle.alignment = .center
         subtitle.maximumNumberOfLines = 2
         stack.addArrangedSubview(subtitle)
-        return stack
+        surface.addSubview(stack)
+        pin(stack, to: surface)
+        return surface
     }
 
     private func addSectionTitle(_ title: String) {
-        let field = label(title, size: 13, weight: .semibold, color: .secondaryLabelColor)
+        let field = label(title, size: 12, weight: .semibold, color: .secondaryLabelColor)
         addContent(field)
-        contentStack.setCustomSpacing(7, after: field)
+        contentStack.setCustomSpacing(6, after: field)
     }
 
     private func addContent(_ view: NSView) {
         contentStack.addArrangedSubview(view)
         view.translatesAutoresizingMaskIntoConstraints = false
-        view.widthAnchor.constraint(equalTo: contentStack.widthAnchor, constant: -72).isActive = true
+        view.widthAnchor.constraint(equalTo: contentStack.widthAnchor, constant: -48).isActive = true
     }
 
     private func settingsGroup(rows: [NSView]) -> NSView {
-        let group = NSVisualEffectView()
-        group.material = .contentBackground
-        group.blendingMode = .withinWindow
-        group.state = .active
-        group.wantsLayer = true
-        group.layer?.cornerRadius = 11
-        group.layer?.cornerCurve = .continuous
-        group.layer?.borderWidth = 0.5
-        group.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.28).cgColor
+        let group = SettingsSurfaceView()
 
         let stack = verticalStack(spacing: 0)
         rows.enumerated().forEach { index, row in
@@ -559,12 +627,12 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
     }
 
     private func settingRow(symbol: String, color: NSColor, title: String, detail: String, trailing: NSView) -> NSView {
-        let row = horizontalStack(spacing: 12)
-        row.edgeInsets = NSEdgeInsets(top: 11, left: 13, bottom: 11, right: 13)
-        row.addArrangedSubview(symbolTile(symbol: symbol, color: color, size: 30, symbolSize: 16, radius: 7))
+        let row = horizontalStack(spacing: 11)
+        row.edgeInsets = NSEdgeInsets(top: 9, left: 12, bottom: 9, right: 12)
+        row.addArrangedSubview(symbolTile(symbol: symbol, color: color, size: 28, symbolSize: 15, radius: 7))
 
         let labels = verticalStack(spacing: 2)
-        labels.addArrangedSubview(label(title, size: 13, weight: .medium))
+        labels.addArrangedSubview(label(title, size: 13))
         let detailLabel = label(detail, size: 11, color: .secondaryLabelColor)
         detailLabel.maximumNumberOfLines = 2
         labels.addArrangedSubview(detailLabel)
@@ -572,23 +640,23 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
         row.addArrangedSubview(spacer())
         trailing.setContentHuggingPriority(.required, for: .horizontal)
         row.addArrangedSubview(trailing)
-        row.heightAnchor.constraint(greaterThanOrEqualToConstant: 56).isActive = true
+        row.heightAnchor.constraint(greaterThanOrEqualToConstant: 52).isActive = true
         return row
     }
 
     private func valueSettingRow(title: String, value: String, indicator: SettingsIndicator) -> NSView {
         let row = horizontalStack(spacing: 10)
-        row.edgeInsets = NSEdgeInsets(top: 12, left: 14, bottom: 12, right: 14)
+        row.edgeInsets = NSEdgeInsets(top: 10, left: 12, bottom: 10, right: 12)
         row.addArrangedSubview(label(title, size: 13))
         row.addArrangedSubview(spacer())
         row.addArrangedSubview(statusView(value, indicator: indicator))
-        row.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
+        row.heightAnchor.constraint(greaterThanOrEqualToConstant: 40).isActive = true
         return row
     }
 
     private func animationPreviewRow() -> NSView {
         let row = horizontalStack(spacing: 16)
-        row.edgeInsets = NSEdgeInsets(top: 14, left: 16, bottom: 14, right: 14)
+        row.edgeInsets = NSEdgeInsets(top: 12, left: 14, bottom: 12, right: 12)
 
         let glyphs = horizontalStack(spacing: 12)
         let face = symbolImage("faceid", pointSize: 44, color: AppPreferences.animationColor)
@@ -607,7 +675,7 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
         row.addArrangedSubview(labels)
         row.addArrangedSubview(spacer())
         row.addArrangedSubview(actionButton("Preview", action: #selector(previewAnimation), symbol: "play.fill"))
-        row.heightAnchor.constraint(greaterThanOrEqualToConstant: 78).isActive = true
+        row.heightAnchor.constraint(greaterThanOrEqualToConstant: 72).isActive = true
         return row
     }
 
@@ -883,31 +951,31 @@ private final class SettingsSidebarCell: NSTableCellView {
         let tile = NSView()
         tile.wantsLayer = true
         tile.layer?.backgroundColor = pane.color.cgColor
-        tile.layer?.cornerRadius = 6
+        tile.layer?.cornerRadius = 5
         tile.layer?.cornerCurve = .continuous
         tile.translatesAutoresizingMaskIntoConstraints = false
 
         let image = NSImageView(image: NSImage(systemSymbolName: pane.symbol, accessibilityDescription: pane.title) ?? NSImage())
-        image.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
+        image.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold)
         image.contentTintColor = .white
         image.translatesAutoresizingMaskIntoConstraints = false
         tile.addSubview(image)
 
         let title = NSTextField(labelWithString: pane.title)
-        title.font = .systemFont(ofSize: 13, weight: .medium)
+        title.font = .systemFont(ofSize: 13)
         title.translatesAutoresizingMaskIntoConstraints = false
         textField = title
 
         addSubview(tile)
         addSubview(title)
         NSLayoutConstraint.activate([
-            tile.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            tile.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 7),
             tile.centerYAnchor.constraint(equalTo: centerYAnchor),
-            tile.widthAnchor.constraint(equalToConstant: 25),
-            tile.heightAnchor.constraint(equalToConstant: 25),
+            tile.widthAnchor.constraint(equalToConstant: 22),
+            tile.heightAnchor.constraint(equalToConstant: 22),
             image.centerXAnchor.constraint(equalTo: tile.centerXAnchor),
             image.centerYAnchor.constraint(equalTo: tile.centerYAnchor),
-            title.leadingAnchor.constraint(equalTo: tile.trailingAnchor, constant: 9),
+            title.leadingAnchor.constraint(equalTo: tile.trailingAnchor, constant: 8),
             title.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
             title.centerYAnchor.constraint(equalTo: centerYAnchor)
         ])
@@ -953,6 +1021,35 @@ private final class SettingsColorSwatchButton: NSButton {
         layer?.shadowOpacity = isSelectedColor ? 0.22 : 0
         layer?.shadowRadius = 2
         layer?.shadowOffset = .zero
+    }
+}
+
+private final class SettingsSurfaceView: NSView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.cornerRadius = 12
+        layer?.cornerCurve = .continuous
+        updateBackground()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateBackground()
+    }
+
+    private func updateBackground() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            let isDark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            let color = isDark
+                ? NSColor(calibratedWhite: 0.158, alpha: 1)
+                : NSColor(calibratedWhite: 0.955, alpha: 1)
+            layer?.backgroundColor = color.cgColor
+        }
     }
 }
 
