@@ -9,6 +9,7 @@ enum AppPreferences {
     static let recognitionThresholdKey = "RecognitionThreshold"
     static let maxAttemptsKey = "MaxAttemptsPerLock"
     static let onboardingFinishedKey = "OnboardingFinished"
+    static let animationColorKey = "AnimationColor"
 
     static func registerDefaults() {
         UserDefaults.standard.register(defaults: [
@@ -38,6 +39,23 @@ enum AppPreferences {
     static var maxAttempts: Int {
         get { max(1, UserDefaults.standard.integer(forKey: maxAttemptsKey)) }
         set { UserDefaults.standard.set(max(1, min(newValue, 5)), forKey: maxAttemptsKey) }
+    }
+
+    static var animationColor: NSColor {
+        get {
+            guard let data = UserDefaults.standard.data(forKey: animationColorKey),
+                  let color = try? NSKeyedUnarchiver.unarchivedObject(ofClass: NSColor.self, from: data) else {
+                return .systemBlue
+            }
+            return color
+        }
+        set {
+            guard let data = try? NSKeyedArchiver.archivedData(
+                withRootObject: newValue,
+                requiringSecureCoding: true
+            ) else { return }
+            UserDefaults.standard.set(data, forKey: animationColorKey)
+        }
     }
 }
 
@@ -280,394 +298,6 @@ final class AppMenuActions: NSObject {
     @objc func quit() { delegate?.quit() }
 }
 
-@MainActor
-final class SettingsWindowController: NSWindowController {
-    private weak var app: FaceUnlockApplication?
-    private let engine: FaceUnlockEngine
-    private let contentStack = NSStackView()
-    private let scrollView = NSScrollView()
-
-    init(app: FaceUnlockApplication, engine: FaceUnlockEngine) {
-        self.app = app
-        self.engine = engine
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 760, height: 760),
-            styleMask: [.titled, .closable, .resizable],
-            backing: .buffered,
-            defer: false
-        )
-        window.title = "FaceUnlock Settings"
-        window.minSize = NSSize(width: 700, height: 620)
-        super.init(window: window)
-        configureContent()
-        window.center()
-    }
-
-    required init?(coder: NSCoder) {
-        nil
-    }
-
-    func refresh() {
-        configureContent()
-    }
-
-    private func configureContent() {
-        SettingsActions.shared.delegate = app
-
-        contentStack.arrangedSubviews.forEach {
-            contentStack.removeArrangedSubview($0)
-            $0.removeFromSuperview()
-        }
-
-        let snapshot = engine.snapshot()
-
-        contentStack.orientation = .vertical
-        contentStack.alignment = .leading
-        contentStack.spacing = 18
-        contentStack.edgeInsets = NSEdgeInsets(top: 24, left: 24, bottom: 24, right: 24)
-        contentStack.translatesAutoresizingMaskIntoConstraints = false
-
-        contentStack.addArrangedSubview(headerView(snapshot: snapshot))
-        contentStack.addArrangedSubview(overviewCards())
-
-        let topColumns = horizontalStack(spacing: 16)
-        topColumns.addArrangedSubview(section(
-            title: "General",
-            subtitle: "Core behavior",
-            views: [
-                toggleRow(
-                    title: "Enable Face Unlock",
-                    detail: "Starts recognition only when the Mac is locked.",
-                    checked: AppPreferences.enableFaceUnlock,
-                    action: #selector(SettingsActions.toggleFaceUnlock)
-                ),
-                separator(),
-                toggleRow(
-                    title: "Launch at Login",
-                    detail: "Keeps FaceUnlock available after you sign in.",
-                    checked: AppPreferences.launchAtLogin,
-                    action: #selector(SettingsActions.toggleLaunchAtLogin)
-                )
-            ]
-        ))
-        topColumns.addArrangedSubview(section(
-            title: "Face",
-            subtitle: "Local enrollment",
-            views: [
-                valueRow(title: "Face enrolled", value: faceEnrolled() ? "Yes" : "No", status: faceEnrolled() ? .ok : .warning),
-                primaryButton("Re-enroll Face", symbol: "faceid", action: #selector(SettingsActions.startEnrollment))
-            ]
-        ))
-        contentStack.addArrangedSubview(topColumns)
-
-        let middleColumns = horizontalStack(spacing: 16)
-        middleColumns.addArrangedSubview(section(
-            title: "Password",
-            subtitle: "Stored only in macOS Keychain",
-            views: [
-                valueRow(title: "Mac password stored", value: LoginPasswordKeychain.passwordAvailable() ? "Yes" : "No", status: LoginPasswordKeychain.passwordAvailable() ? .ok : .warning),
-                buttonRow([
-                    primaryButton("Update Password", symbol: "key.fill", action: #selector(SettingsActions.updatePassword)),
-                    secondaryButton("Delete", symbol: "trash", action: #selector(SettingsActions.deletePassword))
-                ])
-            ]
-        ))
-        middleColumns.addArrangedSubview(section(
-            title: "Security",
-            subtitle: "Conservative defaults",
-            views: [
-                valueRow(title: "Maximum attempts per lock", value: "\(AppPreferences.maxAttempts)", status: .neutral),
-                valueRow(title: "Recognition threshold", value: String(format: "%.2f", AppPreferences.recognitionThreshold), status: .neutral)
-            ]
-        ))
-        contentStack.addArrangedSubview(middleColumns)
-
-        let runtimeColumns = horizontalStack(spacing: 16)
-        runtimeColumns.addArrangedSubview(section(
-            title: "Runtime",
-            subtitle: "Live engine status",
-            views: [
-                valueRow(title: "App running", value: Format.yesNo(snapshot.appRunning), status: snapshot.appRunning ? .ok : .error),
-                valueRow(title: "Session monitor", value: snapshot.sessionMonitorActive ? "Active" : "Inactive", status: snapshot.sessionMonitorActive ? .ok : .error),
-                valueRow(title: "Current session", value: snapshot.currentSession.rawValue.capitalized, status: snapshot.currentSession == .unlocked ? .neutral : .warning),
-                valueRow(title: "Unlock engine", value: snapshot.unlockEngineEnabled ? "Enabled" : "Disabled", status: snapshot.unlockEngineEnabled ? .ok : .warning),
-                valueRow(title: "Camera", value: snapshot.cameraOn ? "On" : "Off", status: snapshot.cameraOn ? .warning : .neutral),
-                valueRow(title: "Last lock event", value: snapshot.lastLockEvent, status: .neutral),
-                valueRow(title: "Last face result", value: snapshot.lastFaceResult, status: .neutral),
-                valueRow(title: "Last unlock attempt", value: snapshot.lastUnlockAttempt, status: .neutral),
-                valueRow(title: "Last error", value: snapshot.lastError, status: snapshot.lastError == "None" ? .ok : .error)
-            ]
-        ))
-        runtimeColumns.addArrangedSubview(section(
-            title: "Permissions",
-            subtitle: "Required by macOS",
-            views: [
-                permissionRow(
-                    symbol: "camera.fill",
-                    title: "Camera",
-                    detail: "Used only while locked, testing, or enrolling.",
-                    granted: cameraGranted(),
-                    actionTitle: "Open Camera Settings",
-                    action: #selector(SettingsActions.openCameraSettings)
-                ),
-                separator(),
-                permissionRow(
-                    symbol: "keyboard.fill",
-                    title: "Accessibility",
-                    detail: "Allows FaceUnlock to type into Lock Screen.",
-                    granted: AXIsProcessTrusted(),
-                    actionTitle: "Open Accessibility Settings",
-                    action: #selector(SettingsActions.openAccessibilitySettings)
-                )
-            ]
-        ))
-        contentStack.addArrangedSubview(runtimeColumns)
-
-        let visual = NSVisualEffectView()
-        visual.material = .windowBackground
-        visual.blendingMode = .behindWindow
-        visual.state = .active
-
-        scrollView.drawsBackground = false
-        scrollView.hasVerticalScroller = true
-        scrollView.documentView = contentStack
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
-        visual.addSubview(scrollView)
-
-        NSLayoutConstraint.activate([
-            scrollView.leadingAnchor.constraint(equalTo: visual.leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: visual.trailingAnchor),
-            scrollView.topAnchor.constraint(equalTo: visual.topAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: visual.bottomAnchor),
-            contentStack.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor)
-        ])
-
-        window?.contentView = visual
-    }
-
-    private func headerView(snapshot: FaceUnlockEngineSnapshot) -> NSView {
-        let container = roundedContainer(material: .underWindowBackground, radius: 18)
-        let row = horizontalStack(spacing: 14)
-        row.edgeInsets = NSEdgeInsets(top: 18, left: 18, bottom: 18, right: 18)
-
-        let icon = NSImageView(image: NSImage(named: "FaceUnlock") ?? NSImage(systemSymbolName: "faceid", accessibilityDescription: "FaceUnlock") ?? NSImage())
-        icon.setContentHuggingPriority(.required, for: .horizontal)
-        NSLayoutConstraint.activate([
-            icon.widthAnchor.constraint(equalToConstant: 48),
-            icon.heightAnchor.constraint(equalToConstant: 48)
-        ])
-        row.addArrangedSubview(icon)
-
-        let titleStack = verticalStack(spacing: 3)
-        titleStack.addArrangedSubview(text("FaceUnlock", size: 24, weight: .semibold))
-        titleStack.addArrangedSubview(text("Unlock your Mac with your face", size: 13, color: .secondaryLabelColor))
-        row.addArrangedSubview(titleStack)
-
-        row.addArrangedSubview(spacer())
-        row.addArrangedSubview(badge(snapshot.unlockEngineEnabled ? "Active" : "Paused", status: snapshot.unlockEngineEnabled ? .ok : .warning))
-        container.addSubview(row)
-        pin(row, to: container)
-        return container
-    }
-
-    private func overviewCards() -> NSView {
-        let row = horizontalStack(spacing: 12)
-        row.distribution = .fillEqually
-        row.addArrangedSubview(statusCard(symbol: "faceid", title: "Face", value: faceEnrolled() ? "Enrolled" : "Missing", status: faceEnrolled() ? .ok : .warning))
-        row.addArrangedSubview(statusCard(symbol: "key.fill", title: "Password", value: LoginPasswordKeychain.passwordAvailable() ? "Stored" : "Missing", status: LoginPasswordKeychain.passwordAvailable() ? .ok : .warning))
-        row.addArrangedSubview(statusCard(symbol: "camera.fill", title: "Camera", value: cameraGranted() ? "Granted" : "Missing", status: cameraGranted() ? .ok : .error))
-        row.addArrangedSubview(statusCard(symbol: "hand.raised.fill", title: "Accessibility", value: AXIsProcessTrusted() ? "Granted" : "Missing", status: AXIsProcessTrusted() ? .ok : .error))
-        return row
-    }
-
-    private func section(title: String, subtitle: String, views: [NSView]) -> NSView {
-        let container = roundedContainer(material: .contentBackground, radius: 14)
-        let stack = verticalStack(spacing: 10)
-        stack.edgeInsets = NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
-        stack.addArrangedSubview(text(title, size: 15, weight: .semibold))
-        stack.addArrangedSubview(text(subtitle, size: 12, color: .secondaryLabelColor))
-        views.forEach { stack.addArrangedSubview($0) }
-        container.addSubview(stack)
-        pin(stack, to: container)
-        container.widthAnchor.constraint(greaterThanOrEqualToConstant: 320).isActive = true
-        return container
-    }
-
-    private func statusCard(symbol: String, title: String, value: String, status: UIStatus) -> NSView {
-        let container = roundedPlainContainer(status.backgroundColor, radius: 14)
-        let stack = verticalStack(spacing: 6)
-        stack.edgeInsets = NSEdgeInsets(top: 14, left: 14, bottom: 14, right: 14)
-
-        let icon = NSImageView(image: NSImage(systemSymbolName: symbol, accessibilityDescription: title) ?? NSImage())
-        icon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 22, weight: .medium)
-        icon.contentTintColor = status.foregroundColor
-        icon.setContentHuggingPriority(.required, for: .vertical)
-        stack.addArrangedSubview(icon)
-        stack.addArrangedSubview(text(title, size: 12, color: .secondaryLabelColor))
-        stack.addArrangedSubview(text(value, size: 15, weight: .semibold, color: status.foregroundColor))
-        container.addSubview(stack)
-        pin(stack, to: container)
-        return container
-    }
-
-    private func toggleRow(title: String, detail: String, checked: Bool, action: Selector) -> NSView {
-        let row = horizontalStack(spacing: 12)
-        let labels = verticalStack(spacing: 3)
-        labels.addArrangedSubview(text(title, size: 13, weight: .medium))
-        labels.addArrangedSubview(text(detail, size: 12, color: .secondaryLabelColor))
-        row.addArrangedSubview(labels)
-        row.addArrangedSubview(spacer())
-
-        let toggle = NSButton(checkboxWithTitle: "", target: SettingsActions.shared, action: action)
-        toggle.state = checked ? .on : .off
-        toggle.setButtonType(.switch)
-        row.addArrangedSubview(toggle)
-        return row
-    }
-
-    private func permissionRow(symbol: String, title: String, detail: String, granted: Bool, actionTitle: String, action: Selector) -> NSView {
-        let stack = verticalStack(spacing: 10)
-        let row = horizontalStack(spacing: 10)
-
-        let icon = NSImageView(image: NSImage(systemSymbolName: symbol, accessibilityDescription: title) ?? NSImage())
-        icon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 18, weight: .medium)
-        icon.contentTintColor = granted ? UIStatus.ok.foregroundColor : UIStatus.error.foregroundColor
-        row.addArrangedSubview(icon)
-
-        let labels = verticalStack(spacing: 2)
-        labels.addArrangedSubview(text(title, size: 13, weight: .medium))
-        labels.addArrangedSubview(text(detail, size: 12, color: .secondaryLabelColor))
-        row.addArrangedSubview(labels)
-        row.addArrangedSubview(spacer())
-        row.addArrangedSubview(badge(granted ? "Granted" : "Missing", status: granted ? .ok : .error))
-
-        stack.addArrangedSubview(row)
-        stack.addArrangedSubview(secondaryButton(actionTitle, symbol: "gearshape", action: action))
-        return stack
-    }
-
-    private func valueRow(title: String, value: String, status: UIStatus) -> NSView {
-        let row = horizontalStack(spacing: 10)
-        row.addArrangedSubview(text(title, size: 13, color: .labelColor))
-        row.addArrangedSubview(spacer())
-        row.addArrangedSubview(badge(value, status: status))
-        return row
-    }
-
-    private func buttonRow(_ buttons: [NSButton]) -> NSView {
-        let row = horizontalStack(spacing: 10)
-        buttons.forEach { row.addArrangedSubview($0) }
-        row.addArrangedSubview(spacer())
-        return row
-    }
-
-    private func primaryButton(_ title: String, symbol: String, action: Selector) -> NSButton {
-        let button = NSButton(title: title, target: SettingsActions.shared, action: action)
-        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: title)
-        button.bezelStyle = .rounded
-        button.controlSize = .large
-        return button
-    }
-
-    private func secondaryButton(_ title: String, symbol: String, action: Selector) -> NSButton {
-        let button = NSButton(title: title, target: SettingsActions.shared, action: action)
-        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: title)
-        button.bezelStyle = .rounded
-        return button
-    }
-
-    private func badge(_ value: String, status: UIStatus) -> NSView {
-        let label = text(value, size: 12, weight: .semibold, color: status.foregroundColor)
-        label.alignment = .center
-        let container = roundedPlainContainer(status.backgroundColor, radius: 8)
-        container.addSubview(label)
-        label.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 9),
-            label.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -9),
-            label.topAnchor.constraint(equalTo: container.topAnchor, constant: 4),
-            label.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -4)
-        ])
-        return container
-    }
-
-    private func separator() -> NSView {
-        let view = NSBox()
-        view.boxType = .separator
-        return view
-    }
-
-    private func text(_ value: String, size: CGFloat, weight: NSFont.Weight = .regular, color: NSColor = .labelColor) -> NSTextField {
-        let field = NSTextField(labelWithString: value)
-        field.font = .systemFont(ofSize: size, weight: weight)
-        field.textColor = color
-        field.lineBreakMode = .byTruncatingTail
-        return field
-    }
-
-    private func horizontalStack(spacing: CGFloat) -> NSStackView {
-        let stack = NSStackView()
-        stack.orientation = .horizontal
-        stack.alignment = .centerY
-        stack.spacing = spacing
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        return stack
-    }
-
-    private func verticalStack(spacing: CGFloat) -> NSStackView {
-        let stack = NSStackView()
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = spacing
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        return stack
-    }
-
-    private func spacer() -> NSView {
-        let view = NSView()
-        view.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        return view
-    }
-
-    private func roundedContainer(material: NSVisualEffectView.Material, radius: CGFloat) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
-        view.material = material
-        view.blendingMode = .withinWindow
-        view.state = .active
-        view.wantsLayer = true
-        view.layer?.cornerRadius = radius
-        view.layer?.cornerCurve = .continuous
-        return view
-    }
-
-    private func roundedPlainContainer(_ color: NSColor, radius: CGFloat) -> NSView {
-        let view = NSView()
-        view.wantsLayer = true
-        view.layer?.backgroundColor = color.cgColor
-        view.layer?.cornerRadius = radius
-        view.layer?.cornerCurve = .continuous
-        return view
-    }
-
-    private func pin(_ child: NSView, to parent: NSView) {
-        child.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            child.leadingAnchor.constraint(equalTo: parent.leadingAnchor),
-            child.trailingAnchor.constraint(equalTo: parent.trailingAnchor),
-            child.topAnchor.constraint(equalTo: parent.topAnchor),
-            child.bottomAnchor.constraint(equalTo: parent.bottomAnchor)
-        ])
-    }
-
-    private func faceEnrolled() -> Bool {
-        FileManager.default.fileExists(atPath: TemplateStore().url.path)
-    }
-
-    private func cameraGranted() -> Bool {
-        AVCaptureDevice.authorizationStatus(for: .video) == .authorized
-    }
-}
-
 private enum UIStatus {
     case ok
     case warning
@@ -870,20 +500,6 @@ private enum AppStyle {
             child.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -inset)
         ])
     }
-}
-
-@MainActor
-final class SettingsActions: NSObject {
-    static let shared = SettingsActions()
-    weak var delegate: FaceUnlockApplication?
-
-    @objc func toggleFaceUnlock() { delegate?.toggleFaceUnlock() }
-    @objc func toggleLaunchAtLogin() { delegate?.toggleLaunchAtLogin() }
-    @objc func startEnrollment() { delegate?.startEnrollment() }
-    @objc func updatePassword() { delegate?.updatePassword() }
-    @objc func deletePassword() { delegate?.deletePassword() }
-    @objc func openCameraSettings() { delegate?.openCameraSettings() }
-    @objc func openAccessibilitySettings() { delegate?.openAccessibilitySettings() }
 }
 
 @MainActor

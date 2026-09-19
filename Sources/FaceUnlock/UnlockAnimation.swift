@@ -131,7 +131,7 @@ private final class UnlockIndicatorView: NSView {
         successTimer?.invalidate()
         bounceTimer?.invalidate()
         imageView.removeAllSymbolEffects(animated: false)
-        imageView.contentTintColor = .systemBlue
+        imageView.contentTintColor = AppPreferences.animationColor
         imageView.image = faceID
         imageView.alphaValue = 1
 
